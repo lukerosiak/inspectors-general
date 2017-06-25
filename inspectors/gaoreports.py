@@ -3,6 +3,7 @@
 import datetime
 import logging
 import os
+import json
 from urllib.parse import urljoin
 
 from utils import utils, inspector
@@ -13,19 +14,23 @@ excellent reports:
 
 * Reports, ported from Ruby:
     https://github.com/sunlightlabs/congress/blob/master/tasks/gao_reports/gao_reports.rb
-* Restricted reports, which is a new dataset and worth including as unreleased reports
+* Restricted reports, which is a new dataset and worth including as unreleased
+reports
     http://www.gao.gov/restricted/restricted_reports
-* Open recommendations
-    http://www.gao.gov/recommendations
 * Bid protest decisions, for which @vzvenyach wrote a Python scraper
     https://github.com/vzvenyach/gao
 
 GAO provides an API for the first type. It also provides .txt versions
 of those reports, called "Accessible Text".
+
+* Open recommendations
+    http://www.gao.gov/recommendations
+I wrote a scraper for this, but concluded they may nay not be the best fit
+for this repository, in part because we already have the reports the recs
+come from.
 """
 
-# <oig_url>
-archive = 1997
+# https://www.gao.gov
 
 # options:
 #   standard since/year options for a year range to fetch from.
@@ -39,7 +44,6 @@ def run(options):
 
   scrape_reports(options)
   #scrape_restricted_reports(options)
-  #scrape_open_recs(options)
   #scrape_bid_protests(options)
 
 
@@ -47,6 +51,7 @@ def scrape_reports(options):
   """Pull reports from "Reports and Testimonies - Browse by date" web page."""
 
   REPORTS_URL = 'http://www.gao.gov/browse/date/custom?adv_begin_date=01/01/%s&adv_end_date=12/31/%s&rows=50&o=%s' # % (year, year, offset)
+  archive = 1997
 
   year_range = inspector.year_range(options, archive)
   for year in year_range:
@@ -57,7 +62,13 @@ def scrape_reports(options):
         REPORTS_URL % (year, year, offset))
       results = doc.select("div.listing")
       for result in results:
-        report = process_report(result)
+        # <img alt="pdf icon" src="/images/pdf.png"/> 
+        # <a href="/assets/690/685452.pdf">View Report (PDF, 8 pages)</a>
+        # 685452 is the ID used by the API.
+        pdf_links = result.findAll('li',{'class': 'pdf-link'})
+        # Last PDF is full report. First one could be Highlights.
+        api_id = pdf_links[-1].a['href'].split('/')[-1].replace('.pdf','')
+        report = process_report(api_id, year_range)
         if report:
           inspector.save_report(report)
         page_links = doc.select("a.non-current_page")
@@ -67,13 +78,11 @@ def scrape_reports(options):
           is_next_page = False
 
 
-def process_report(result):
+def process_report(api_id, year_range):
 
   """Use the report ID obtained from HTML to hit GAO's API"""
 
-  report_id = result['data-content_id']
-
-  api_url = "http://www.gao.gov/api/id/%s" % report_id
+  api_url = "http://www.gao.gov/api/id/%s" % api_id
   details = json.loads(utils.download(api_url))[0]
 
   """looks like this {
@@ -112,18 +121,19 @@ def process_report(result):
   if details['bucket_term']:
     categories.append(details['bucket_term'])
   published_on = details['docdate']
-  posted_at = Time.parse details['actual_release_date']
+  posted_at = details['actual_release_date'][:10]
   report_number = details['rptno']
   title = details['title']
   gao_type = details['document_type']
   description = ''
   if details.get('description', None):
-    description = strip_tags(details['description'])
+    description = details['description']
 
-  if published_on.year not in year_range:
+  if int(published_on[:4]) not in year_range:
     logging.debug("[%s] Skipping, not in requested range." % report_url)
     return
 
+  print(details)
   # urls
   landing_url = details['url']
   text_url = details['text_url']
@@ -142,30 +152,30 @@ def process_report(result):
     return None
 
   report = {
-    'inspector': 'gao',
+    'inspector': 'gaoreports',
     'inspector_url': 'https://www.gao.gov',
     # often GAO reports do focus on a program in a specific external agency,
     # but we're not attempting to discern it in a structured way.
     # We'll just have GAO for the inspector and the agency.
     'agency': 'Government Accountability Office',
-    'agency_name': 'Government Accountability Office'
+    'agency_name': 'Government Accountability Office',
     'report_id': report_number,
-    'url': details['url'],
+    'landing_url': landing_url,
+    'url': pdf_url,
     'title': title,
     'type': details['document_type'], # report_type,
-    'published_on': datetime.datetime.strftime(published_on, "%Y-%m-%d"),
+    'published_on': published_on,
 
     'text_url': details['text_url'],
     # if the text is downloaded, needs to be treated as ISO-8859-1 and then
     # converted to UTF-8. In Ruby:
     # full_text.force_encoding("ISO-8859-1")
     # full_text = full_text.encode "UTF-8", :invalid => :replace, :undef => :replace
-    'pdf_url': details['pdf_url'],
 
     'supplement_url': details['supplement_url'],
     'youtube_id': details['youtube_id'],
     'links': details['additional_links'],
-    'description': description
+    'description': description,
     'categories': categories,
     'category_img': details['category_img'],
     'category_img_alt': details['category_img_alt'],
@@ -193,6 +203,7 @@ All others who wish to obtain one or more of these products should follow the
 instructions found on Requesting Restricted Products."""
 
   REPORTS_URL = 'http://www.gao.gov/restricted/restricted_reports'
+  archive = 2014
 
   year_range = inspector.year_range(options, archive)
   doc = utils.beautifulsoup_from_url(REPORTS_URL)
@@ -214,7 +225,7 @@ def process_restricted_report(options):
     # but we're not attempting to discern it in a structured way.
     # We'll just have GAO for the inspector and the agency.
     'agency': 'Government Accountability Office',
-    'agency_name': 'Government Accountability Office'
+    'agency_name': 'Government Accountability Office',
     'report_id': report_number,
     'unreleased': True,
     'landing_url': REPORTS_URL, # Just an index page, so don't harvest text from it.
@@ -228,66 +239,7 @@ def process_restricted_report(options):
 
 
 
-def scrape_open_recs(options):
 
-  REPORTS_URL = 'https://www.gao.gov/recommendations?browse=orgdesc_s'
-  doc = utils.beautifulsoup_from_url(REPORTS_URL)
-  results = doc.select("div.listing")
-  for result in results:
-    report = process_restricted_report(result)
-    if report:
-      inspector.save_report(report)
-
-
-topic_soup = BeautifulSoup(topics).findAll('a',{'class': 'facet_header'})
-
-for a in topic_soup:
-    topic_text = a.text
-    topic_url = 'http://www.gao.gov/recommendations' + a['href'][1:]
-
-    html = urllib2.urlopen(topic_url).read()
-
-    getpage(topic_text, topic_url, html)
-
-def getpage(topic_text, topic_url, html):
-
-    soup = BeautifulSoup(html)
-
-    rec_block = soup.findAll('div', {'class': 'recommendations_block'})
-    reports = soup.findAll('div', {'class': 'ql_inner'})
-
-    for i, r in enumerate(reports):
-        report_link = r.a['href']
-        report_title = r.a.text
-        report_date = r.span.text
-        year = report_date.split()[-1]
-
-        recs = rec_block[i].findAll('div',{'class':'recommendations_individual_rec'})
-        for rec in recs:
-            s = str(rec).split('<br />')
-            rec_text = s[0][
-              len('<div class="recommendations_individual_rec"><b>Recommendation:</b>'):]
-            rec_agency = s[2][len('<b>Agency:</b>'):]
-            rec_status = s[3][len('<b>Status:</b>'):]
-            rec_comments = s[5][len('<b>Comments:</b>'):]
-
-            fout.writerow([topic_text, topic_url, rec_text, rec_agency, rec_status, rec_comments])
-
-  report = {
-    'inspector': 'gao',
-    'inspector_url': 'https://www.gao.gov',
-    # often GAO reports do focus on a program in a specific external agency,
-    # but we're not attempting to discern it in a structured way.
-    # We'll just have GAO for the inspector and the agency.
-    'agency': 'Government Accountability Office',
-    'agency_name': rec_agency,
-    'report_id': report_number,
-    'url': report_link,
-    'title': report_title,
-    'type': 'Open recommendation',
-    'published_on': datetime.datetime.strftime(report_date, "%Y-%m-%d"),
-
-  }
 
 
 
