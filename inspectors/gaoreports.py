@@ -2,9 +2,7 @@
 
 import datetime
 import logging
-import os
 import json
-from urllib.parse import urljoin
 
 from utils import utils, inspector
 
@@ -12,22 +10,26 @@ from utils import utils, inspector
 Not the GAO IG, but the GAO itself, who publishes an amazing number of
 excellent reports:
 
-* Reports, ported from Ruby:
-    https://github.com/sunlightlabs/congress/blob/master/tasks/gao_reports/gao_reports.rb
-* Restricted reports, which is a new dataset and worth including as unreleased
-reports
+* Reports
+* Restricted (unreleased) reports
     http://www.gao.gov/restricted/restricted_reports
+
 * Bid protest decisions, for which @vzvenyach wrote a Python scraper
     https://github.com/vzvenyach/gao
-
-GAO provides an API for the first type. It also provides .txt versions
-of those reports, called "Accessible Text".
+This is not included here but could be added in easily enough if it
+is agreed that they are sufficiently "oversighty" to fit here.
 
 * Open recommendations
     http://www.gao.gov/recommendations
-I wrote a scraper for this, but concluded they may nay not be the best fit
+I wrote a scraper for this but believe they are likely not be the best fit
 for this repository, in part because we already have the reports the recs
-come from.
+come from and because they may eventually close. So it's not included here.
+
+Report pages don't break out which agency they pertain to, if any, so this
+lists GAO as both the inspector and the agency. However, they are mapped
+internally, as they are browsable by agency here:
+http://www.gao.gov/browse/agency/Executive
+
 """
 
 # https://www.gao.gov
@@ -36,7 +38,13 @@ come from.
 #   standard since/year options for a year range to fetch from.
 #
 # Notes for IG's web team:
-# Not sure if the gao.gov/api/ interface is documented anywhere?
+# Not sure if the gao.gov/api/ interface is documented anywhere? Also,
+# data-content_id that was used by an older Ruby scraper seems to have gone
+# away.
+# Without it the API is hit-or-miss because only one unpredictable version of
+# the report--highlights, full report, etc,--gets the complete JSON response,
+# while the others are missing URLs. Ideally you could pass a date range
+# to the API and get an index.
 
 
 
@@ -44,14 +52,18 @@ def run(options):
 
   scrape_reports(options)
   #scrape_restricted_reports(options)
-  #scrape_bid_protests(options)
 
 
 def scrape_reports(options):
   """Pull reports from "Reports and Testimonies - Browse by date" web page."""
 
-  REPORTS_URL = 'http://www.gao.gov/browse/date/custom?adv_begin_date=01/01/%s&adv_end_date=12/31/%s&rows=50&o=%s' # % (year, year, offset)
-  archive = 1997
+  REPORTS_URL = 'http://www.gao.gov/browse/date/custom?adv_begin_date=01/01/' +\
+    '%s&adv_end_date=12/31/%s&rows=50&o=%s' # % (year, year, offset)
+  archive = 1950
+  # Amazingly, reports go back to 1940, though those are unlikely to be
+  # legible enough to OCR. Also very cool, even 1950s-era reports seem to have
+  # a highlightable embedded text layer in them. Of course, it was the
+  # General Accounting Office back then and less oversighty.
 
   year_range = inspector.year_range(options, archive)
   for year in year_range:
@@ -62,25 +74,37 @@ def scrape_reports(options):
         REPORTS_URL % (year, year, offset))
       results = doc.select("div.listing")
       for result in results:
-        # <img alt="pdf icon" src="/images/pdf.png"/> 
-        # <a href="/assets/690/685452.pdf">View Report (PDF, 8 pages)</a>
-        # 685452 is the ID used by the API.
-        pdf_links = result.findAll('li',{'class': 'pdf-link'})
-        # Last PDF is full report. First one could be Highlights.
-        api_id = pdf_links[-1].a['href'].split('/')[-1].replace('.pdf','')
-        report = process_report(api_id, year_range)
+        report = process_report(result, year_range)
         if report:
           inspector.save_report(report)
-        page_links = doc.select("a.non-current_page")
-        if len(page_links) and page_links[-1].text.startswith('Next'):
-          offset += 50
-        else:
-          is_next_page = False
+      page_links = doc.select("a.non-current_page")
+      if len(page_links) and page_links[-1].text.startswith('Next'):
+        offset += 50
+      else:
+        is_next_page = False
 
 
-def process_report(api_id, year_range):
+def process_report(result, year_range):
 
   """Use the report ID obtained from HTML to hit GAO's API"""
+
+  # <img alt="pdf icon" src="/images/pdf.png"/> 
+  # <a href="/assets/690/685452.pdf">View Report (PDF, 8 pages)</a>
+  # 685452 is the ID used by the API.
+  landing_url = 'https://www.gao.gov%s' % result.a['href']
+  report_number = landing_url.split('/')[-1]
+
+  pdf_links = result.findAll('li', {'class': 'pdf-link'})
+  (pdf_url, highlights_url, accessible_url) = (None, None, None)
+  for link in pdf_links:
+    if 'View Report' in link.a.string:
+      report_url = 'https://www.gao.gov%s' % link.a['href']
+    if 'Highlights' in link.a.string:
+      highlights_url = 'https://www.gao.gov%s' % link.a['href']
+    if 'Accessible' in link.a.string:
+      accessible_url = 'https://www.gao.gov%s' % link.a['href']
+  # Last PDF is full report. First one could be Highlights.
+  api_id = pdf_links[-1].a['href'].split('/')[-1].replace('.pdf', '')
 
   api_url = "http://www.gao.gov/api/id/%s" % api_id
   details = json.loads(utils.download(api_url))[0]
@@ -122,7 +146,6 @@ def process_report(api_id, year_range):
     categories.append(details['bucket_term'])
   published_on = details['docdate']
   posted_at = details['actual_release_date'][:10]
-  report_number = details['rptno']
   title = details['title']
   gao_type = details['document_type']
   description = ''
@@ -132,20 +155,6 @@ def process_report(api_id, year_range):
   if int(published_on[:4]) not in year_range:
     logging.debug("[%s] Skipping, not in requested range." % report_url)
     return
-
-  print(details)
-  # urls
-  landing_url = details['url']
-  text_url = details['text_url']
-  pdf_url = details['pdf_url']
-
-  # seen a mixup - http://gao.gov/api/id/586393
-  if pdf_url and pdf_url.endswith('.txt'):
-    text_url = pdf_url
-    pdf_url = None
-    # seen it - http://gao.gov/api/id/586175
-  elif pdf_url and not pdf_url.endswith('.pdf'):
-    pdf_url = None
 
   if not landing_url and not pdf_url:
     loggin.debug("[%s] No landing URL or PDF, skipping..." % report_id)
@@ -161,17 +170,12 @@ def process_report(api_id, year_range):
     'agency_name': 'Government Accountability Office',
     'report_id': report_number,
     'landing_url': landing_url,
-    'url': pdf_url,
+    'url': report_url,
     'title': title,
     'type': details['document_type'], # report_type,
     'published_on': published_on,
 
-    'text_url': details['text_url'],
-    # if the text is downloaded, needs to be treated as ISO-8859-1 and then
-    # converted to UTF-8. In Ruby:
-    # full_text.force_encoding("ISO-8859-1")
-    # full_text = full_text.encode "UTF-8", :invalid => :replace, :undef => :replace
-
+    'accessible_url': accessible_url,
     'supplement_url': details['supplement_url'],
     'youtube_id': details['youtube_id'],
     'links': details['additional_links'],
@@ -209,14 +213,23 @@ instructions found on Requesting Restricted Products."""
   doc = utils.beautifulsoup_from_url(REPORTS_URL)
   results = doc.select("div.listing")
   for result in results:
-    report = process_restricted_report(result)
+    report = process_restricted_report(result, year_range)
     if report:
       inspector.save_report(report)
 
-def process_restricted_report(options):
+def process_restricted_report(div, year_range):
   """<div class="listing grayBorderTop" data-type="listing" >Information  Security: Federal Trade Commission Needs to Address Program Weaknesses<br />
                     <div class="release_info">
                     <span class=productNumberAndDate>GAO-15-76SU: Published: November 20, 2014</span>"""
+
+  title = div.contents[0]
+  span = div.div.span.string
+  report_number = span.split(': ')[0]
+  report_date_str = span.split(': ')[-1]
+  report_date = datetime.datetime.strptime(report_date_str, "%B %d, %Y")
+
+  if report_date.year not in year_range:
+    return None
 
   report = {
     'inspector': 'gao',
@@ -231,7 +244,7 @@ def process_restricted_report(options):
     'landing_url': REPORTS_URL, # Just an index page, so don't harvest text from it.
     'title': title,
     'type': 'Unreleased report',
-    'published_on': datetime.datetime.strftime(published_on, "%Y-%m-%d"),
+    'published_on': datetime.datetime.strftime(report_date, "%Y-%m-%d"),
 
   }
 
