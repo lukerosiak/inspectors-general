@@ -122,7 +122,7 @@ def process_report(result, year_range):
   json_response = json.loads(utils.download(api_url))
   if not json_response:
     return None
-  details = json.loads(utils.download(api_url))[0]
+  details = json_response[0]
 
   """looks like this {
     "youtube_id": null,
