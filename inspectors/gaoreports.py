@@ -4,7 +4,7 @@ import datetime
 import logging
 import json
 
-from utils import utils, inspector
+from utils import utils, inspector, admin
 
 """
 Not the GAO IG, but the GAO itself, who publishes an amazing number of
@@ -101,6 +101,10 @@ def process_report(result, year_range):
     published_on = parse_date(dates[-1].replace('.', '').strip())
 
   pdf_links = result.findAll('li', {'class': 'pdf-link'})
+  if not published_on:
+    admin.log_no_date("gaoreports", report_number, title, landing_url)
+    return
+
   (report_url, highlights_url, accessible_url) = (None, None, None)
   for link in pdf_links:
     if not link.a or link.a['href'] == '':
@@ -241,6 +245,10 @@ def process_restricted_report(div, year_range, REPORTS_URL):
   span = div.div.span.string.strip()
   report_number = span.split(': ')[0]
   report_date = parse_date(span.split(': ')[-1])
+
+  if not report_date:
+    admin.log_no_date("gaoreports", report_number, title)
+    return
 
   if report_date.year not in year_range:
     return None
