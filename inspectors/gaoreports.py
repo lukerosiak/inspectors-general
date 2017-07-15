@@ -107,6 +107,10 @@ def process_report(result, year_range):
     admin.log_no_date("gaoreports", report_number, title, landing_url)
     return
 
+  if published_on.year not in year_range:
+    logging.debug("[%s] Skipping, not in requested range." % landing_url)
+    return
+
   pdf_links = result.find_all('li', {'class': 'pdf-link'})
   (report_url, highlights_url, accessible_url) = (None, None, None)
   for link in pdf_links:
@@ -124,6 +128,10 @@ def process_report(result, year_range):
   except Exception:  # very old reports are sometimes different
     api_id = os.path.splitext(os.path.basename(result.a['href']))[0]
   api_id = api_id.lstrip('0')
+
+  if not landing_url and not report_url:
+    logging.debug("[%s] No landing URL or PDF, skipping..." % api_id)
+    return None
 
   api_url = "http://www.gao.gov/api/id/%s" % api_id
   json_response = json.loads(utils.download(api_url))
@@ -176,14 +184,6 @@ def process_report(result, year_range):
   # report_type = details['document_type']
   # if details.get('description', None):
   #   description = details['description']
-
-  if published_on.year not in year_range:
-    logging.debug("[%s] Skipping, not in requested range." % report_url)
-    return
-
-  if not landing_url and not report_url:
-    logging.debug("[%s] No landing URL or PDF, skipping..." % api_id)
-    return None
 
   report = {
     'inspector': 'gaoreports',
