@@ -90,8 +90,11 @@ def process_report(result, year_range):
   """Use the report ID obtained from HTML to hit GAO's API"""
   # <a href="/assets/690/685452.pdf">View Report (PDF, 8 pages)</a>
   # 685452 is the ID used by the API.
+
+  # The link's path looks like "/products/GAO-17-558", use the last part
+  # as the report ID
   landing_url = urljoin('https://www.gao.gov', result.a['href'])
-  report_number = os.path.splitext(os.path.basename(result.a['href']))[0]
+  report_number = os.path.basename(result.a['href'])
 
   title = re.sub("\\s+", " ", result.span.text).strip()
   description = re.sub("\\s+", " ", result.p.text).strip()
