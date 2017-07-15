@@ -3,6 +3,8 @@
 import datetime
 import logging
 import json
+import os
+from urllib.parse import urljoin
 
 from utils import utils, inspector, admin
 
@@ -87,8 +89,8 @@ def process_report(result, year_range):
   """Use the report ID obtained from HTML to hit GAO's API"""
   # <a href="/assets/690/685452.pdf">View Report (PDF, 8 pages)</a>
   # 685452 is the ID used by the API.
-  landing_url = 'https://www.gao.gov%s' % result.a['href']
-  report_number = landing_url.split('/')[-1]
+  landing_url = urljoin('https://www.gao.gov', result.a['href'])
+  report_number = os.path.splitext(os.path.basename(result.a['href']))[0]
 
   title = result.span.text.replace('  ', ' ')
   description = result.p.string
@@ -110,16 +112,16 @@ def process_report(result, year_range):
     if not link.a or link.a['href'] == '':
       continue
     if 'View Report' in link.a.string:
-      report_url = 'https://www.gao.gov%s' % link.a['href']
+      report_url = urljoin('https://www.gao.gov', link.a['href'])
     if 'Highlights' in link.a.string:
-      highlights_url = 'https://www.gao.gov%s' % link.a['href']
+      highlights_url = urljoin('https://www.gao.gov', link.a['href'])
     if 'Accessible' in link.a.string:
-      accessible_url = 'https://www.gao.gov%s' % link.a['href']
+      accessible_url = urljoin('https://www.gao.gov', link.a['href'])
   # Last PDF is full report. First one could be Highlights.
   try:  # get the ID from one of the filenames, minus the extension
-    api_id = pdf_links[-1].a['href'].split('/')[-1].split('.')[0]
+    api_id = os.path.splitext(os.path.basename(pdf_links[-1].a['href']))[0]
   except Exception:  # very old reports are sometimes different
-    api_id = result.a['href'].split('/')[-1].split('.')[0]
+    api_id = os.path.splitext(os.path.basename(result.a['href']))[0]
   api_id = api_id.lstrip('0')
 
   api_url = "http://www.gao.gov/api/id/%s" % api_id
