@@ -96,18 +96,18 @@ def process_report(result, year_range):
   title = re.sub("\\s+", " ", result.span.text).strip()
   description = re.sub("\\s+", " ", result.p.text).strip()
 
-  dates = result.findAll('span')[-1].string.replace('\n', '').split(': ')
+  dates = result.find_all('span')[-1].string.replace('\n', '').split(': ')
   # ['Published', 'Mar 31, 1959. Publicly Released', 'Mar 31, 1959.']
   # Prefer the first, fall back to the latter if necessary--not sure it ever is
   published_on = parse_date(dates[1].split('.')[0].strip())
   if not published_on:
     published_on = parse_date(dates[-1].replace('.', '').strip())
 
-  pdf_links = result.findAll('li', {'class': 'pdf-link'})
   if not published_on:
     admin.log_no_date("gaoreports", report_number, title, landing_url)
     return
 
+  pdf_links = result.find_all('li', {'class': 'pdf-link'})
   (report_url, highlights_url, accessible_url) = (None, None, None)
   for link in pdf_links:
     if not link.a or link.a['href'] == '':
