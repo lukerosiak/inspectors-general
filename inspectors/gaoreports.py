@@ -4,6 +4,7 @@ import datetime
 import logging
 import json
 import os
+import re
 from urllib.parse import urljoin
 
 from utils import utils, inspector, admin
@@ -92,8 +93,8 @@ def process_report(result, year_range):
   landing_url = urljoin('https://www.gao.gov', result.a['href'])
   report_number = os.path.splitext(os.path.basename(result.a['href']))[0]
 
-  title = result.span.text.replace('  ', ' ')
-  description = result.p.string
+  title = re.sub("\\s+", " ", result.span.text).strip()
+  description = re.sub("\\s+", " ", result.p.text).strip()
 
   dates = result.findAll('span')[-1].string.replace('\n', '').split(': ')
   # ['Published', 'Mar 31, 1959. Publicly Released', 'Mar 31, 1959.']
